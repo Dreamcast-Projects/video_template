@@ -2,6 +2,7 @@
 #include <kos/thread.h>
 #include <dc/sound/stream.h>
 #include <dc/pvr.h>
+#include <arch/timer.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +63,12 @@ static int initialize_audio();
 // The blueprint of these callbacks can be different depending on the format
 static void format_video_cb(unsigned short *buf, int width, int height, int stride, int texture_height);
 static void format_audio_cb(unsigned char *buf, int size, int channels);
+
+// ms_per_frame = 1000 / FRAMERATE_OF_VIDEO => 1000 / 30 fps => 33.3ms
+static float ms_per_frame = 33.3f;
+static uint64_t last_time;
+static uint64_t dc_get_time();
+static void frame_delay();
 
 int player_init() {
     snd_stream_init();
@@ -321,6 +328,8 @@ static void format_video_cb(unsigned short *texture_data, int width, int height,
     /* send the video frame as a texture over to video RAM */
     pvr_txr_load(buf, vid_stream.textures[vid_stream.current_frame], stride * texture_height * 2);
 
+    frame_delay();
+
     pvr_wait_ready();
     pvr_scene_begin();
     pvr_list_begin(PVR_LIST_OP_POLY);
@@ -335,6 +344,7 @@ static void format_video_cb(unsigned short *texture_data, int width, int height,
     pvr_scene_finish();
 
     vid_stream.current_frame = !vid_stream.current_frame;
+    last_time = dc_get_time();
 }
 
 static void format_audio_cb(unsigned char *audio_data, int data_length, int channels) {
@@ -425,6 +435,8 @@ static int initialize_graphics(int width, int height)
 
     vid_stream.initialized = 1;
 
+    last_time = dc_get_time();
+
     return SUCCESS;
 }
 
@@ -472,4 +484,23 @@ static void* player_snd_thread() {
     }
 
     return NULL;
+}
+
+uint64_t dc_get_time() {
+    uint32_t s, ms;
+	uint64_t msec;
+
+	timer_ms_gettime(&s, &ms);
+	msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
+
+	return msec;
+}
+
+static void frame_delay() {
+    uint64_t CPU_real_time = dc_get_time() - last_time;
+          
+    while(CPU_real_time < ms_per_frame) { 
+        CPU_real_time = dc_get_time() - last_time;
+        thd_pass();
+    }
 }
