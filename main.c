@@ -26,7 +26,7 @@ int main()
     pvr_init_defaults();
 
     if(player_init()) {
-        format_player_t* player = player_create("/rd/roguelogo.roq", 0);
+        format_player_t* player = player_create("/rd/roguelogo.roq");
         player_play(player, frame_cb);
     }
     

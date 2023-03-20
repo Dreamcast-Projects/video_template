@@ -64,11 +64,13 @@ static void format_video_cb(unsigned short *buf, int width, int height, int stri
 static void format_audio_cb(unsigned char *buf, int size, int channels);
 
 int player_init() {
-    if(snd_stream_init() < 0)
-		return ERROR;
+    snd_stream_init();
+    pvr_init_defaults();
+    // if(snd_stream_init() < 0)
+	// 	return ERROR;
 
-    if(pvr_init_defaults() < 0)
-         return ERROR;
+    // if(pvr_init_defaults() < 0)
+    //      return ERROR;
 
     snd_stream.shnd = SND_STREAM_INVALID;
     snd_stream.vol = 240;
