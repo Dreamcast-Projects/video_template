@@ -109,7 +109,7 @@ void player_shutdown(format_player_t* format_player) {
         format_destroy(format_player->format);
 }
 
-format_player_t* player_create(const char* filename, int loop) {
+format_player_t* player_create(const char* filename) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
     
@@ -154,7 +154,7 @@ format_player_t* player_create(const char* filename, int loop) {
     return player;
 }
 
-format_player_t* player_create_fd(FILE* file, int loop) {
+format_player_t* player_create_fd(FILE* file) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
 
@@ -199,7 +199,7 @@ format_player_t* player_create_fd(FILE* file, int loop) {
     return player;
 }
 
-format_player_t* player_create_buf(const unsigned char* buf, const unsigned int length, int loop) {
+format_player_t* player_create_buf(const unsigned char* buf, const unsigned int length) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
 
