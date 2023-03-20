@@ -244,15 +244,27 @@ format_player_t* player_create_buf(const unsigned char* buf, const unsigned int 
     return player;
 }
 
-void player_decode(format_player_t* format_player) {
+// void player_decode(format_player_t* format_player) {
+//    format_decode(format_player->format);
+// }
 
-}
-
-void player_play(format_player_t* format_player) {
+void player_play(format_player_t* format_player, frame_callback frame_cb) {
     if(snd_stream.status == SND_STREAM_STATUS_STREAMING)
        return;
 
     snd_stream.status = SND_STREAM_STATUS_RESUMING;
+
+    do {
+        if(frame_cb)
+            frame_cb();
+
+        format_decode(format_player->format);
+    } while (!format_has_ended(format_player->format) && 
+            (snd_stream.status == SND_STREAM_STATUS_STREAMING ||
+             snd_stream.status == SND_STREAM_STATUS_RESUMING));
+
+    // if(format_has_ended(format_player->format))
+    //     player_shutdown(format_player->format);
 }
 
 void player_pause(format_player_t* format_player) {
@@ -456,8 +468,6 @@ static void* player_snd_thread() {
                 break;
         }
     }
-
-    //player_shutdown(format_player->format);
 
     return NULL;
 }

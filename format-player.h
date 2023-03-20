@@ -17,6 +17,10 @@ extern "C" {
 
 extern int player_errno;
 
+/* The library calls this function to ask whether it should quit playback.
+ * Return non-zero if it's time to quite. */
+typedef void (*frame_callback)();
+
 typedef struct format_player_t format_player_t;
 
 int player_init();
@@ -26,8 +30,8 @@ format_player_t* player_create(const char* filename, int loop);
 format_player_t* player_create_fd(FILE* f, int loop);
 format_player_t* player_create_buf(const unsigned char* buf, const unsigned int length, int loop);
 
-void player_decode(format_player_t* format_player);
-void player_play(format_player_t* format_player);
+//void player_decode(format_player_t* format_player);
+void player_play(format_player_t* format_player, frame_callback frame_cb);
 void player_pause(format_player_t* format_player);
 void player_stop(format_player_t* format_player);
 void player_volume(format_player_t* format_player, int vol);
