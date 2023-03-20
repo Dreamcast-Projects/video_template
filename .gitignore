@@ -1,0 +1,3 @@
+*.o
+*.elf
+.DS_Store
