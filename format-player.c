@@ -59,6 +59,7 @@ typedef struct {
     pvr_vertex_t vert[4];
     int current_frame;
     int initialized;
+    int fps;
 } video_hndlr;
 
 static video_hndlr vid_stream;
@@ -79,11 +80,11 @@ static void format_audio_cb(unsigned char *buf, int size, int channels);
 
 static void initialize_defaults(format_player_t* player, int index);
 
-// ms_per_frame = 1000 / FRAMERATE_OF_VIDEO => 1000 / 30 fps => 33.3ms
-static float ms_per_frame = 33.3f;
-static uint64_t last_time;
-static uint64_t dc_get_time();
-static void frame_delay();
+static uint64 dc_get_time();
+static unsigned int frame = 0;
+static long samples_done = 0;
+static float ATS = 0, VTS = 0; /* A/V Timestamps For Synchronization */
+static double AUDIO_SAMPLES_PER_SEC = 0;
 
 int player_init() {
     snd_stream_init();
@@ -320,11 +321,14 @@ int player_has_ended(format_player_t* format_player) {
 
 static void format_video_cb(unsigned short *texture_data, int width, int height, int stride, int texture_height) {
 
-    /* send the video frame as a texture over to video RAM */
+    // send the video frame as a texture over to video RAM 
     dcache_flush_range((uint32)texture_data, stride * texture_height * 2);   // dcache flush is needed when using DMA
     pvr_txr_load_dma(texture_data, vid_stream.textures[vid_stream.current_frame], stride * texture_height * 2, 1, NULL, 0);
 
-    frame_delay();
+    VTS = ++frame / (double)vid_stream.fps;
+    while(ATS < VTS) {
+        thd_pass();
+    } 
 
     pvr_wait_ready();
     pvr_scene_begin();
@@ -370,6 +374,9 @@ static void* aica_callback(snd_stream_hnd_t hnd, int bytes_needed, int* bytes_re
     }
 
     mutex_unlock(&snd_stream.decode_buffer_mut);
+
+    samples_done += bytes_needed; /* Record the Audio Time Stamp */
+    ATS = samples_done/AUDIO_SAMPLES_PER_SEC;
 
     *bytes_returning = bytes_needed;
 
@@ -434,8 +441,6 @@ static int initialize_graphics(int width, int height)
 
     vid_stream.initialized = 1;
 
-    last_time = dc_get_time();
-
     return SUCCESS;
 }
 
@@ -494,22 +499,13 @@ static uint64_t dc_get_time() {
     return msec;
 }
 
-static void frame_delay() {
-    uint64_t CPU_real_time = dc_get_time() - last_time;
-          
-    while(CPU_real_time < ms_per_frame) {
-        thd_pass();
-        CPU_real_time = dc_get_time() - last_time;
-    }
-    last_time = dc_get_time();
-}
-
 static void initialize_defaults(format_player_t* player, int index) {
     format_set_video_decode_callback(player->format, format_video_cb);
     format_set_audio_decode_callback(player->format, format_audio_cb);
 
     snd_stream.shnd = index;
     snd_stream.status = SND_STREAM_STATUS_READY;
+    AUDIO_SAMPLES_PER_SEC = (double)(snd_stream.rate*snd_stream.channels*2.0);
 
     player->initialized_format = 1;
 
