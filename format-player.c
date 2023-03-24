@@ -3,6 +3,7 @@
 #include <dc/sound/stream.h>
 #include <dc/pvr.h>
 #include <arch/timer.h>
+#include <arch/cache.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -318,10 +319,10 @@ int player_has_ended(format_player_t* format_player) {
 }
 
 static void format_video_cb(unsigned short *texture_data, int width, int height, int stride, int texture_height) {
-    unsigned short *buf = texture_data;
 
     /* send the video frame as a texture over to video RAM */
-    pvr_txr_load(buf, vid_stream.textures[vid_stream.current_frame], stride * texture_height * 2);
+    dcache_flush_range((uint32)texture_data, stride * texture_height * 2);   // dcache flush is needed when using DMA
+    pvr_txr_load_dma(texture_data, vid_stream.textures[vid_stream.current_frame], stride * texture_height * 2, 1, NULL, 0);
 
     frame_delay();
 
@@ -348,7 +349,7 @@ static void format_audio_cb(unsigned char *audio_data, int data_length, int chan
 
     int success = ring_buffer_write(&snd_stream.decode_buffer, audio_data, data_length);
     if (!success) {
-        printf("Buffer Overflow\n\n");
+        printf("Buffer Overflow - decoding audio too fast and there is no room in buffer\n\n");
         fflush(stdout);
     }
 
@@ -364,7 +365,7 @@ static void* aica_callback(snd_stream_hnd_t hnd, int bytes_needed, int* bytes_re
 
     int success = ring_buffer_read(&snd_stream.decode_buffer, snd_stream.pcm_buffer, bytes_needed);
     if (!success) {
-        printf("Buffer Underflow\n\n");
+        printf("Buffer Underflow - didnt have enough data in the buffer to give to AICA\n\n");
         fflush(stdout);
     }
 
