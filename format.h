@@ -41,6 +41,8 @@ typedef void(*format_audio_decode_callback)
 	(unsigned char *audio_frame_data, int size, int channels);
 void format_set_audio_decode_callback(format_t* format, format_audio_decode_callback cb);
 
+void format_seek(format_t* format);
+
 int format_get_loop(format_t* format);
 
 void format_set_loop(format_t* format, int loop);

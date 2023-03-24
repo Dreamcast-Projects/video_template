@@ -15,6 +15,10 @@ extern "C" {
 #define FORMAT_INIT_FAILURE   0x05
 #define SOURCE_ERROR          0x06
 
+#define FORMAT_SEEK_CUR  0
+#define FORMAT_SEEK_SET  1
+#define FORMAT_SEEK_END  2
+
 extern int player_errno;
 
 /* The library calls this function to ask whether it should quit playback.
@@ -28,9 +32,9 @@ void player_shutdown(format_player_t* format_player);
 
 format_player_t* player_create(const char* filename);
 format_player_t* player_create_fd(FILE* f);
-format_player_t* player_create_buf(const unsigned char* buf, const unsigned int length);
+format_player_t* player_create_buf(unsigned char* buf, const unsigned int length);
 
-//void player_decode(format_player_t* format_player);
+void player_seek(format_player_t* format_player, long int offset, int whence);
 void player_play(format_player_t* format_player, frame_callback frame_cb);
 void player_pause(format_player_t* format_player);
 void player_stop(format_player_t* format_player);

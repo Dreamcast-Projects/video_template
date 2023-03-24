@@ -26,7 +26,7 @@ int main()
     pvr_init_defaults();
 
     if(player_init()) {
-        format_player_t* player = player_create("/rd/roguelogo.roq");
+        format_player_t* player = player_create("/PATH/TO/VIDEO.vid");
         player_play(player, frame_cb);
     }
     

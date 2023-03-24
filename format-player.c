@@ -23,12 +23,21 @@ int player_errno = 0;
 
 struct format_player_t {
     format_t* format;
+    int paused;
     int vol;
     int initialized_format;
 };
 
 #define STREAM_BUFFER_SIZE 1024*1024
 typedef int snd_stream_hnd_t;
+
+typedef struct {
+    unsigned char *buffer;
+    int head;
+    int tail;
+    int size;
+    int capacity;
+} ring_buffer;
 
 typedef struct {
     snd_stream_hnd_t shnd; 
@@ -39,7 +48,7 @@ typedef struct {
     unsigned int vol;
     unsigned int rate;
     unsigned int channels;
-    unsigned char* decode_buffer;
+    ring_buffer decode_buffer;
     unsigned char pcm_buffer[65536+16384];
 } sound_hndlr;
 
@@ -54,6 +63,9 @@ typedef struct {
 static video_hndlr vid_stream;
 static sound_hndlr snd_stream;
 
+static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
+static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
+
 static void* player_snd_thread();
 static void* aica_callback(snd_stream_hnd_t hnd, int req, int* done);
 
@@ -63,6 +75,8 @@ static int initialize_audio();
 // The blueprint of these callbacks can be different depending on the format
 static void format_video_cb(unsigned short *buf, int width, int height, int stride, int texture_height);
 static void format_audio_cb(unsigned char *buf, int size, int channels);
+
+static void initialize_defaults(format_player_t* player, int index);
 
 // ms_per_frame = 1000 / FRAMERATE_OF_VIDEO => 1000 / 30 fps => 33.3ms
 static float ms_per_frame = 33.3f;
@@ -74,7 +88,7 @@ int player_init() {
     snd_stream_init();
     pvr_init_defaults();
     // if(snd_stream_init() < 0)
-	// 	return ERROR;
+    // 	return ERROR;
 
     // if(pvr_init_defaults() < 0)
     //      return ERROR;
@@ -83,10 +97,10 @@ int player_init() {
     snd_stream.vol = 240;
     snd_stream.status = SND_STREAM_STATUS_NULL;
 
-    if(thd_create(0, player_snd_thread, NULL) != NULL) {
-		snd_stream.status = SND_STREAM_STATUS_READY;
+    if(thd_create(1, player_snd_thread, NULL) != NULL) {
+        snd_stream.status = SND_STREAM_STATUS_READY;
         return SUCCESS;
-	}
+    }
     else {
         snd_stream.status = SND_STREAM_STATUS_ERROR;
         return ERROR;
@@ -105,13 +119,15 @@ void player_shutdown(format_player_t* format_player) {
     }
 
     if(vid_stream.initialized) {
+        vid_stream.initialized = 0;
         pvr_mem_free(vid_stream.textures[0]);
         pvr_mem_free(vid_stream.textures[1]);
     }
 
     if(snd_stream.initialized) {
-        free(snd_stream.decode_buffer);
-        mutex_destroy(&snd_stream.decode_buffer_mut); 
+        snd_stream.initialized = 0;
+        free(snd_stream.decode_buffer.buffer);
+        mutex_destroy(&snd_stream.decode_buffer_mut);
     }
 
     if(format_player != NULL && format_player->initialized_format)
@@ -149,16 +165,7 @@ format_player_t* player_create(const char* filename) {
         return NULL;
     }
 
-    format_set_video_decode_callback(player->format, format_video_cb);
-    format_set_audio_decode_callback(player->format, format_audio_cb);
-
-    snd_stream.shnd = index;
-    snd_stream.status = SND_STREAM_STATUS_READY;
-
-    player->initialized_format = 1;
-
-    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
-    initialize_audio();
+    initialize_defaults(player, index);
 
     return player;
 }
@@ -194,21 +201,12 @@ format_player_t* player_create_fd(FILE* file) {
         return NULL;
     }
 
-    format_set_video_decode_callback(player->format, format_video_cb);
-    format_set_audio_decode_callback(player->format, format_audio_cb);
-
-    snd_stream.shnd = index;
-    snd_stream.status = SND_STREAM_STATUS_READY;
-
-    player->initialized_format = 1;
-
-    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
-    initialize_audio();
+    initialize_defaults(player, index);
 
     return player;
 }
 
-format_player_t* player_create_buf(const unsigned char* buf, const unsigned int length) {
+format_player_t* player_create_buf(unsigned char* buf, const unsigned int length) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
 
@@ -239,28 +237,30 @@ format_player_t* player_create_buf(const unsigned char* buf, const unsigned int 
         return NULL;
     }
 
-    format_set_video_decode_callback(player->format, format_video_cb);
-    format_set_audio_decode_callback(player->format, format_audio_cb);
-
-    snd_stream.shnd = index;
-    snd_stream.status = SND_STREAM_STATUS_READY;
-
-    player->initialized_format = 1;
-
-    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
-    initialize_audio();
+    initialize_defaults(player, index);
 
     return player;
 }
 
-// void player_decode(format_player_t* format_player) {
-//    format_decode(format_player->format);
-// }
+void player_seek(format_player_t* format_player, long int offset, int whence) {
+   switch (whence) {
+	case FORMAT_SEEK_CUR:
+		
+		break;
+	case FORMAT_SEEK_SET:
+		
+		break;
+	case FORMAT_SEEK_END:
+		
+		break;
+	}
+}
 
 void player_play(format_player_t* format_player, frame_callback frame_cb) {
     if(snd_stream.status == SND_STREAM_STATUS_STREAMING)
        return;
 
+    format_player->paused = 0;
     snd_stream.status = SND_STREAM_STATUS_RESUMING;
 
     do {
@@ -268,28 +268,23 @@ void player_play(format_player_t* format_player, frame_callback frame_cb) {
             frame_cb();
 
         format_decode(format_player->format);
-    } while (!format_has_ended(format_player->format) && 
-            (snd_stream.status == SND_STREAM_STATUS_STREAMING ||
-             snd_stream.status == SND_STREAM_STATUS_RESUMING));
-
-    // if(format_has_ended(format_player->format))
-    //     player_shutdown(format_player->format);
+    } while (!format_has_ended(format_player->format));
 }
 
 void player_pause(format_player_t* format_player) {
-    if(snd_stream.status == SND_STREAM_STATUS_READY ||
-       snd_stream.status == SND_STREAM_STATUS_PAUSING)
-       return;
-       
-    snd_stream.status = SND_STREAM_STATUS_PAUSING;
+    format_player->paused = 1;
+    if(snd_stream.status != SND_STREAM_STATUS_READY &&
+       snd_stream.status != SND_STREAM_STATUS_PAUSING)
+        snd_stream.status = SND_STREAM_STATUS_PAUSING;
 }
 
 void player_stop(format_player_t* format_player) {
-    if(snd_stream.status == SND_STREAM_STATUS_READY ||
-       snd_stream.status == SND_STREAM_STATUS_STOPPING)
-       return;
-       
-    snd_stream.status = SND_STREAM_STATUS_STOPPING;
+    format_player->paused = 1;
+    format_seek(format_player->format);
+
+    if(snd_stream.status != SND_STREAM_STATUS_READY &&
+       snd_stream.status != SND_STREAM_STATUS_STOPPING)
+        snd_stream.status = SND_STREAM_STATUS_STOPPING;
 }
 
 void player_volume(format_player_t* format_player, int vol) {
@@ -344,37 +339,40 @@ static void format_video_cb(unsigned short *texture_data, int width, int height,
     pvr_scene_finish();
 
     vid_stream.current_frame = !vid_stream.current_frame;
-    last_time = dc_get_time();
 }
 
 static void format_audio_cb(unsigned char *audio_data, int data_length, int channels) {
-    /* Copy the decoded PCM samples to our local PCM buffer */
-    mutex_lock(&snd_stream.decode_buffer_mut);         
+    snd_stream.channels = channels;
 
-    memcpy(snd_stream.decode_buffer + snd_stream.pcm_size, audio_data, data_length);
-    snd_stream.pcm_size += data_length;
+    mutex_lock(&snd_stream.decode_buffer_mut);
+
+    int success = ring_buffer_write(&snd_stream.decode_buffer, audio_data, data_length);
+    if (!success) {
+        printf("Buffer Overflow\n\n");
+        fflush(stdout);
+    }
 
     mutex_unlock(&snd_stream.decode_buffer_mut);
 }
 
-// When we call snd_stream_poll(), it calls this callback
 static void* aica_callback(snd_stream_hnd_t hnd, int bytes_needed, int* bytes_returning) {
-    /* Wait for Format Decoder to produce enough samples */
-    while(snd_stream.pcm_size < bytes_needed)
-        thd_pass();   
+    while (snd_stream.decode_buffer.size < bytes_needed) {
+        thd_pass();
+    }
 
-    /* Copy the Requested PCM Samples to the AICA Driver */         
     mutex_lock(&snd_stream.decode_buffer_mut);
 
-    memcpy(snd_stream.pcm_buffer, snd_stream.decode_buffer, bytes_needed);
-    snd_stream.pcm_size -= bytes_needed;
-    memmove(snd_stream.decode_buffer, snd_stream.decode_buffer+bytes_needed, snd_stream.pcm_size);
+    int success = ring_buffer_read(&snd_stream.decode_buffer, snd_stream.pcm_buffer, bytes_needed);
+    if (!success) {
+        printf("Buffer Underflow\n\n");
+        fflush(stdout);
+    }
 
     mutex_unlock(&snd_stream.decode_buffer_mut);
 
-    *bytes_returning = bytes_needed;    
+    *bytes_returning = bytes_needed;
 
-    return snd_stream.pcm_buffer; /* Return the requested samples to the AICA driver */
+    return snd_stream.pcm_buffer;
 }
 
 static int initialize_graphics(int width, int height) 
@@ -445,8 +443,8 @@ static int initialize_audio() {
         return SUCCESS;
 
     /* allocate PCM buffer */
-    snd_stream.decode_buffer = malloc(STREAM_BUFFER_SIZE);
-    if(snd_stream.decode_buffer == NULL)
+    snd_stream.decode_buffer.buffer = malloc(STREAM_BUFFER_SIZE);
+    if(snd_stream.decode_buffer.buffer == NULL)
         return OUT_OF_MEMORY;
     
     /* Create a mutex to handle the double-threaded buffer */
@@ -462,7 +460,6 @@ static void* player_snd_thread() {
         switch(snd_stream.status)
         {
             case SND_STREAM_STATUS_READY:
-                //
                 break;
             case SND_STREAM_STATUS_RESUMING:
                 snd_stream_start(snd_stream.shnd, snd_stream.rate, snd_stream.channels-1);
@@ -486,21 +483,63 @@ static void* player_snd_thread() {
     return NULL;
 }
 
-uint64_t dc_get_time() {
+static uint64_t dc_get_time() {
     uint32_t s, ms;
-	uint64_t msec;
+    uint64_t msec;
 
-	timer_ms_gettime(&s, &ms);
-	msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
+    timer_ms_gettime(&s, &ms);
+    msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
 
-	return msec;
+    return msec;
 }
 
 static void frame_delay() {
     uint64_t CPU_real_time = dc_get_time() - last_time;
           
-    while(CPU_real_time < ms_per_frame) { 
-        CPU_real_time = dc_get_time() - last_time;
+    while(CPU_real_time < ms_per_frame) {
         thd_pass();
+        CPU_real_time = dc_get_time() - last_time;
     }
+    last_time = dc_get_time();
+}
+
+static void initialize_defaults(format_player_t* player, int index) {
+    format_set_video_decode_callback(player->format, format_video_cb);
+    format_set_audio_decode_callback(player->format, format_audio_cb);
+
+    snd_stream.shnd = index;
+    snd_stream.status = SND_STREAM_STATUS_READY;
+
+    player->initialized_format = 1;
+
+    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
+    initialize_audio();
+}
+
+static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length) {
+    if (data_length > rb->capacity - rb->size) {
+        return 0;
+    }
+
+    for (int i = 0; i < data_length; ++i) {
+        rb->buffer[rb->head] = data[i];
+        rb->head = (rb->head + 1) % rb->capacity;
+    }
+
+    rb->size += data_length;
+    return 1;
+}
+
+static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length) {
+    if (data_length > rb->size) {
+        return 0;
+    }
+
+    for (int i = 0; i < data_length; ++i) {
+        data[i] = rb->buffer[rb->tail];
+        rb->tail = (rb->tail + 1) % rb->capacity;
+    }
+
+    rb->size -= data_length;
+    return 1;
 }
