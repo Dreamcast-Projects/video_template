@@ -31,35 +31,51 @@ format_t* format_create_with_filename(const char* filename);
 format_t* format_create_with_file(FILE* fh, int close_when_done);
 format_t* format_create_with_memory(const unsigned char* bytes, size_t length, int free_when_done);
 
-/* The library calls this function when it has a frame ready for display. */
-typedef void(*format_video_decode_callback)
-	(unsigned short *frame_data, int width, int height, int stride, int texture_height);
-void format_set_video_decode_callback(format_t* format, format_video_decode_callback cb);
+// Reset the file to play from the beginning.  Used by format-player to stop a video
+void format_rewind(format_t* format);
 
-/* The library calls this function when it has pcm samples ready for output. */
-typedef void(*format_audio_decode_callback)
-	(unsigned char *audio_frame_data, int size, int channels);
-void format_set_audio_decode_callback(format_t* format, format_audio_decode_callback cb);
-
-void format_seek(format_t* format);
-
+// Is this video set to loop?
 int format_get_loop(format_t* format);
 
+// Set if we want to look or not.  format-player uses the callback to reset some variables
+// when the video loops
 typedef void(*format_loop_callback)
 	(void);
 void format_set_loop(format_t* format, int loop, format_loop_callback cb);
 
+// Main decode function.  Should decode a frame of video and audio and execute their respective callbacks
 int format_decode(format_t* format);
 
+// Get framerate of the video.
 int format_get_framerate(format_t* format);
 
+// Get the video width
 int format_get_width(format_t* format);
 
+// Get the video height
 int format_get_height(format_t* format);
 
+// Have we reached the EOF of the video?
 int format_has_ended(format_t* format);
 
+// Frees all resources used to create an instance of this format
 void format_destroy(format_t* format);
+
+// The decoder calls this callback function when it has a frame ready for display.
+// You may need to change the params of this depending on your video format.
+typedef void(*format_video_decode_callback)
+	(unsigned short *frame_data, int width, int height, int stride, int texture_height);
+
+// format-player.c takes care of setting this.  
+void format_set_video_decode_callback(format_t* format, format_video_decode_callback cb);
+
+// The decoder calls this callback function when it has pcm samples ready for output.
+// You may need to change the params of this depending on your audio format
+typedef void(*format_audio_decode_callback)
+	(unsigned char *audio_frame_data, int size, int channels);
+
+// format-player.c takes care of setting this.
+void format_set_audio_decode_callback(format_t* format, format_audio_decode_callback cb);
 
 #ifdef __cplusplus
 }

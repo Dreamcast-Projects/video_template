@@ -21,8 +21,8 @@ extern "C" {
 
 extern int player_errno;
 
-/* The library calls this function to ask whether it should quit playback.
- * Return non-zero if it's time to quite. */
+// We call this function once per frame of playing video.  You
+// can use it to pause/stop the video, shutdown the player, exit the app, etc
 typedef void (*frame_callback)();
 
 typedef struct format_player_t format_player_t;
@@ -34,7 +34,6 @@ format_player_t* player_create(const char* filename);
 format_player_t* player_create_file(FILE* f);
 format_player_t* player_create_memory(unsigned char* buf, const unsigned int length);
 
-void player_seek(format_player_t* player, long int offset, int whence);
 void player_play(format_player_t* player, frame_callback frame_cb);
 void player_pause(format_player_t* player);
 void player_stop(format_player_t* player);

@@ -25,7 +25,6 @@ int player_errno = 0;
 struct format_player_t {
     format_t* decoder;
     int paused;
-    int vol;
     int initialized_format;
 };
 
@@ -79,7 +78,7 @@ static int initialize_audio(void);
 static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
 static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
 
-static uint64 dc_get_time();
+static uint64_t dc_get_time();
 
 static video_hndlr vid_stream;
 static sound_hndlr snd_stream;
@@ -258,20 +257,6 @@ format_player_t* player_create_memory(unsigned char* memory, const unsigned int 
     return player;
 }
 
-void player_seek(format_player_t* format_player, long int offset, int whence) {
-   switch (whence) {
-	case FORMAT_SEEK_CUR:
-		
-		break;
-	case FORMAT_SEEK_SET:
-		
-		break;
-	case FORMAT_SEEK_END:
-		
-		break;
-	}
-}
-
 void player_play(format_player_t* format_player, frame_callback frame_cb) {
     if(snd_stream.status == SND_STREAM_STATUS_STREAMING)
        return;
@@ -311,7 +296,7 @@ void player_stop(format_player_t* format_player) {
     frame = 0;
     samples_done = 0;
     format_player->paused = 1;
-    format_seek(format_player->decoder);
+    format_rewind(format_player->decoder);
 
     if(snd_stream.status != SND_STREAM_STATUS_READY &&
        snd_stream.status != SND_STREAM_STATUS_STOPPING)
@@ -349,7 +334,8 @@ int player_has_ended(format_player_t* format_player) {
 }
 
 static void format_loop_cb(void) {
-
+    frame = 0;
+    samples_done = 0;
 }
 
 static void format_video_cb(unsigned short *texture_data, int width, int height, int stride, int texture_height) {

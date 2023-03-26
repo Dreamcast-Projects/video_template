@@ -21,12 +21,16 @@ format_t* format_create_with_memory(const unsigned char* bytes, size_t length, i
     return NULL;
 }
 
+void format_rewind(format_t* format) {
+
+}
+
 int format_get_loop(format_t* format) {
     return -1;
 }
 
 void format_set_loop(format_t* format, int loop, format_loop_callback cb) {
-
+    format->loop_callback = cb;
 }
 
 int format_decode(format_t* format) {
@@ -54,9 +58,9 @@ void format_destroy(format_t* format) {
 }
 
 void format_set_video_decode_callback(format_t* format, format_video_decode_callback cb) {
-
+    format->video_decode_callback = cb;
 }
 
 void format_set_audio_decode_callback(format_t* format, format_audio_decode_callback cb) {
-
+    format->audio_decode_callback = cb;
 }

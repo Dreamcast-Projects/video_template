@@ -4,6 +4,11 @@
 
 #include "format-player.h"
 
+extern uint8 romdisk[];
+KOS_INIT_ROMDISK(romdisk);
+
+static format_player_t* player;
+
 static void frame_cb() {
     maple_device_t *dev;
     cont_state_t *state;
@@ -14,8 +19,18 @@ static void frame_cb() {
         state = (cont_state_t *)maple_dev_status(dev);
 
         if(state)   {
-            if(state->buttons)
-                arch_exit();
+            if(state->buttons & CONT_START) {
+                arch_exit(); // QUIT
+            }
+            else if(state->buttons & CONT_A) {
+                player_play(player, frame_cb);
+            }
+            else if(state->buttons & CONT_B) {
+                player_stop(player);
+            }
+            else if(state->buttons & CONT_X) {
+                player_pause(player);
+            }
         }
     }
 }
@@ -23,25 +38,14 @@ static void frame_cb() {
 int main()
 {
     vid_set_mode(DM_640x480_NTSC_IL, PM_RGB565);
-    pvr_init_defaults();
 
     if(player_init()) {
-        format_player_t* player = player_create("/PATH/TO/VIDEO.vid");
+        player = player_create("/PATH/TO/VIDEO.vid");
+        player_set_loop(player, 1);
         player_play(player, frame_cb);
+
+        player_shutdown(player);
     }
-    
-    // Decode
-    // do {
-    //     if(controller_state(CONT_START))
-    //         break;
-
-    //     if(controller_state(CONT_A))
-    //         ;
-	
-    //     // Decode
-    //     player_decode(player);
-    // } while (!player_has_ended(player));
-
 
     return 0;
 }
