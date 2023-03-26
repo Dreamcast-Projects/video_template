@@ -23,7 +23,7 @@
 int player_errno = 0;
 
 struct format_player_t {
-    format_t* format;
+    format_t* decoder;
     int paused;
     int vol;
     int initialized_format;
@@ -144,7 +144,7 @@ void player_shutdown(format_player_t* format_player) {
     }
 
     if(format_player != NULL && format_player->initialized_format) {
-        format_destroy(format_player->format);
+        format_destroy(format_player->decoder);
         free(format_player);
         format_player = NULL;
     }
@@ -174,8 +174,8 @@ format_player_t* player_create(const char* filename) {
         return NULL;
     }
 
-    player->format = format_create_with_filename(filename);
-    if(!player->format) {
+    player->decoder = format_create_with_filename(filename);
+    if(!player->decoder) {
         snd_stream_destroy(index);
         player_errno = FORMAT_INIT_FAILURE;
         return NULL;
@@ -210,8 +210,8 @@ format_player_t* player_create_file(FILE* file) {
         return NULL;
     }
 
-    player->format = format_create_with_file(file, 1);
-    if(!player->format) {
+    player->decoder = format_create_with_file(file, 1);
+    if(!player->decoder) {
         snd_stream_destroy(index);
         player_errno = FORMAT_INIT_FAILURE;
         return NULL;
@@ -246,8 +246,8 @@ format_player_t* player_create_memory(unsigned char* memory, const unsigned int 
         return NULL;
     }
 
-    player->format = format_create_with_memory(memory, length, 1);
-    if(!player->format) {
+    player->decoder = format_create_with_memory(memory, length, 1);
+    if(!player->decoder) {
         snd_stream_destroy(index);
         player_errno = FORMAT_INIT_FAILURE;
         return NULL;
@@ -295,8 +295,8 @@ void player_play(format_player_t* format_player, frame_callback frame_cb) {
             }
 
             if(!format_player->paused)
-                format_decode(format_player->format);
-        } while (!format_has_ended(format_player->format));
+                format_decode(format_player->decoder);
+        } while (!format_has_ended(format_player->decoder));
     }
 }
 
@@ -311,7 +311,7 @@ void player_stop(format_player_t* format_player) {
     frame = 0;
     samples_done = 0;
     format_player->paused = 1;
-    format_seek(format_player->format);
+    format_seek(format_player->decoder);
 
     if(snd_stream.status != SND_STREAM_STATUS_READY &&
        snd_stream.status != SND_STREAM_STATUS_STOPPING)
@@ -337,15 +337,15 @@ int player_isplaying(format_player_t* format_player) {
 }
 
 int player_get_loop(format_player_t* format_player) {
-    return format_get_loop(format_player->format);
+    return format_get_loop(format_player->decoder);
 }
 
 void player_set_loop(format_player_t* format_player, int loop) {
-    format_set_loop(format_player->format, loop, format_loop_cb);
+    format_set_loop(format_player->decoder, loop, format_loop_cb);
 }
 
 int player_has_ended(format_player_t* format_player) {
-    return format_has_ended(format_player->format);
+    return format_has_ended(format_player->decoder);
 }
 
 static void format_loop_cb(void) {
@@ -393,10 +393,6 @@ static void format_audio_cb(unsigned char *audio_data, int data_length, int chan
 }
 
 static void* aica_callback(snd_stream_hnd_t hnd, int bytes_needed, int* bytes_returning) {
-    while (snd_stream.decode_buffer.size < bytes_needed) {
-        thd_pass();
-    }
-
     mutex_lock(&snd_stream.decode_buffer_mut);
 
     int success = ring_buffer_read(&snd_stream.decode_buffer, snd_stream.pcm_buffer, bytes_needed);
@@ -421,10 +417,10 @@ static void initialize_defaults(format_player_t* player, int index) {
     ATS = 0, VTS = 0;
     audio_samples_per_sec = 0;
 
-    format_set_video_decode_callback(player->format, format_video_cb);
-    format_set_audio_decode_callback(player->format, format_audio_cb);
+    format_set_video_decode_callback(player->decoder, format_video_cb);
+    format_set_audio_decode_callback(player->decoder, format_audio_cb);
 
-    vid_stream.framerate = format_get_framerate(player->format);
+    vid_stream.framerate = format_get_framerate(player->decoder);
 
     snd_stream.shnd = index;
     snd_stream.status = SND_STREAM_STATUS_READY;
@@ -432,7 +428,7 @@ static void initialize_defaults(format_player_t* player, int index) {
 
     player->initialized_format = 1;
 
-    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
+    initialize_graphics(format_get_width(player->decoder), format_get_height(player->decoder));
     initialize_audio();
 }
 

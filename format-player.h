@@ -34,15 +34,15 @@ format_player_t* player_create(const char* filename);
 format_player_t* player_create_file(FILE* f);
 format_player_t* player_create_memory(unsigned char* buf, const unsigned int length);
 
-void player_seek(format_player_t* format_player, long int offset, int whence);
-void player_play(format_player_t* format_player, frame_callback frame_cb);
-void player_pause(format_player_t* format_player);
-void player_stop(format_player_t* format_player);
-void player_volume(format_player_t* format_player, int vol);
-int player_isplaying(format_player_t* format_player);
-int player_get_loop(format_player_t* format_player);
-void player_set_loop(format_player_t* format_player, int loop);
-int player_has_ended(format_player_t* format_player);
+void player_seek(format_player_t* player, long int offset, int whence);
+void player_play(format_player_t* player, frame_callback frame_cb);
+void player_pause(format_player_t* player);
+void player_stop(format_player_t* player);
+void player_volume(format_player_t* player, int vol);
+int player_isplaying(format_player_t* player);
+int player_get_loop(format_player_t* player);
+void player_set_loop(format_player_t* player, int loop);
+int player_has_ended(format_player_t* player);
 
 #ifdef __cplusplus
 }
