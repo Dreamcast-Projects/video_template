@@ -31,8 +31,8 @@ int player_init();
 void player_shutdown(format_player_t* format_player);
 
 format_player_t* player_create(const char* filename);
-format_player_t* player_create_fd(FILE* f);
-format_player_t* player_create_buf(unsigned char* buf, const unsigned int length);
+format_player_t* player_create_file(FILE* f);
+format_player_t* player_create_memory(unsigned char* buf, const unsigned int length);
 
 void player_seek(format_player_t* format_player, long int offset, int whence);
 void player_play(format_player_t* format_player, frame_callback frame_cb);

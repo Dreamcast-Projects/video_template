@@ -29,7 +29,8 @@ struct format_player_t {
     int initialized_format;
 };
 
-#define STREAM_BUFFER_SIZE 1024*1024
+#define AUDIO_BUFFER_SIZE 1024*80
+#define AUDIO_DECODE_BUFFER_SIZE 1024*128
 typedef int snd_stream_hnd_t;
 
 typedef struct {
@@ -50,56 +51,58 @@ typedef struct {
     unsigned int rate;
     unsigned int channels;
     ring_buffer decode_buffer;
-    unsigned char pcm_buffer[65536+16384];
+    unsigned char pcm_buffer[AUDIO_BUFFER_SIZE];
 } sound_hndlr;
 
 typedef struct {
+    int framerate;
+    int initialized;
+    int frame_index;
+    int texture_byte_length;
     pvr_ptr_t textures[2];
     pvr_poly_hdr_t hdr[2];
     pvr_vertex_t vert[4];
-    int current_frame;
-    int initialized;
-    int fps;
 } video_hndlr;
-
-static video_hndlr vid_stream;
-static sound_hndlr snd_stream;
-
-static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
-static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
 
 static void* player_snd_thread();
 static void* aica_callback(snd_stream_hnd_t hnd, int req, int* done);
-
-static int initialize_graphics(int width, int height);
-static int initialize_audio();
 
 // The blueprint of these callbacks can be different depending on the format
 static void format_video_cb(unsigned short *buf, int width, int height, int stride, int texture_height);
 static void format_audio_cb(unsigned char *buf, int size, int channels);
 
 static void initialize_defaults(format_player_t* player, int index);
+static int initialize_graphics(int width, int height);
+static int initialize_audio();
+
+static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
+static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
 
 static uint64 dc_get_time();
-static unsigned int frame = 0;
-static long samples_done = 0;
-static float ATS = 0, VTS = 0; /* A/V Timestamps For Synchronization */
-static double AUDIO_SAMPLES_PER_SEC = 0;
+
+static video_hndlr vid_stream;
+static sound_hndlr snd_stream;
+
+static kthread_t* thread;
+
+static int playing_loop;
+
+// Used to keep video and audio in sync
+static unsigned int frame;
+static unsigned long samples_done;
+static float ATS, VTS;
+static double audio_samples_per_sec;
 
 int player_init() {
     snd_stream_init();
     pvr_init_defaults();
-    // if(snd_stream_init() < 0)
-    // 	return ERROR;
-
-    // if(pvr_init_defaults() < 0)
-    //      return ERROR;
 
     snd_stream.shnd = SND_STREAM_INVALID;
     snd_stream.vol = 240;
     snd_stream.status = SND_STREAM_STATUS_NULL;
 
-    if(thd_create(1, player_snd_thread, NULL) != NULL) {
+    thread = thd_create(0, player_snd_thread, NULL);
+    if(thread != NULL) {
         snd_stream.status = SND_STREAM_STATUS_READY;
         return SUCCESS;
     }
@@ -111,6 +114,11 @@ int player_init() {
 
 void player_shutdown(format_player_t* format_player) {
     snd_stream.status = SND_STREAM_STATUS_DONE;
+    frame = 0;
+    samples_done = 0;
+    playing_loop = 0;
+
+    thd_join(thread, NULL);
 
     if(snd_stream.shnd != SND_STREAM_INVALID) {
         snd_stream_stop(snd_stream.shnd);
@@ -122,6 +130,8 @@ void player_shutdown(format_player_t* format_player) {
 
     if(vid_stream.initialized) {
         vid_stream.initialized = 0;
+        vid_stream.frame_index = 0;
+        vid_stream.texture_byte_length = 0;
         pvr_mem_free(vid_stream.textures[0]);
         pvr_mem_free(vid_stream.textures[1]);
     }
@@ -132,8 +142,11 @@ void player_shutdown(format_player_t* format_player) {
         mutex_destroy(&snd_stream.decode_buffer_mut);
     }
 
-    if(format_player != NULL && format_player->initialized_format)
+    if(format_player != NULL && format_player->initialized_format) {
         format_destroy(format_player->format);
+        free(format_player);
+        format_player = NULL;
+    }
 }
 
 format_player_t* player_create(const char* filename) {
@@ -172,7 +185,7 @@ format_player_t* player_create(const char* filename) {
     return player;
 }
 
-format_player_t* player_create_fd(FILE* file) {
+format_player_t* player_create_file(FILE* file) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
 
@@ -208,13 +221,13 @@ format_player_t* player_create_fd(FILE* file) {
     return player;
 }
 
-format_player_t* player_create_buf(unsigned char* buf, const unsigned int length) {
+format_player_t* player_create_memory(unsigned char* memory, const unsigned int length) {
     snd_stream_hnd_t index;
     format_player_t* player = NULL;
 
     index = snd_stream_alloc(aica_callback, SND_STREAM_BUFFER_MAX/4);
 
-    if(buf == NULL) {
+    if(memory == NULL) {
         player_errno = SOURCE_ERROR;
         return NULL;
     }
@@ -232,7 +245,7 @@ format_player_t* player_create_buf(unsigned char* buf, const unsigned int length
         return NULL;
     }
 
-    player->format = format_create_with_memory(buf, length, 1);
+    player->format = format_create_with_memory(memory, length, 1);
     if(!player->format) {
         snd_stream_destroy(index);
         player_errno = FORMAT_INIT_FAILURE;
@@ -265,12 +278,25 @@ void player_play(format_player_t* format_player, frame_callback frame_cb) {
     format_player->paused = 0;
     snd_stream.status = SND_STREAM_STATUS_RESUMING;
 
-    do {
-        if(frame_cb)
-            frame_cb();
+    // Protect against recursion bc we can call player_play() in
+    // frame_cb()
+    if(!playing_loop)
+    {
+        playing_loop = 1;
 
-        format_decode(format_player->format);
-    } while (!format_has_ended(format_player->format));
+        do {
+            if(frame_cb)
+                frame_cb();
+
+            // We shutdown the player, exit the loop
+            if(snd_stream.status == SND_STREAM_STATUS_NULL) {
+                break;
+            }
+
+            if(!format_player->paused)
+                format_decode(format_player->format);
+        } while (!format_has_ended(format_player->format));
+    }
 }
 
 void player_pause(format_player_t* format_player) {
@@ -281,6 +307,8 @@ void player_pause(format_player_t* format_player) {
 }
 
 void player_stop(format_player_t* format_player) {
+    frame = 0;
+    samples_done = 0;
     format_player->paused = 1;
     format_seek(format_player->format);
 
@@ -299,7 +327,7 @@ void player_volume(format_player_t* format_player, int vol) {
     if(vol < 0)
         vol = 0;
 
-    snd_stream.vol = format_player->vol = vol;
+    snd_stream.vol = vol;
     snd_stream_volume(snd_stream.shnd, snd_stream.vol);
 }
 
@@ -322,19 +350,18 @@ int player_has_ended(format_player_t* format_player) {
 static void format_video_cb(unsigned short *texture_data, int width, int height, int stride, int texture_height) {
 
     // send the video frame as a texture over to video RAM 
-    dcache_flush_range((uint32)texture_data, stride * texture_height * 2);   // dcache flush is needed when using DMA
-    pvr_txr_load_dma(texture_data, vid_stream.textures[vid_stream.current_frame], stride * texture_height * 2, 1, NULL, 0);
+    dcache_flush_range((uint32)texture_data, vid_stream.texture_byte_length);   // dcache flush is needed when using DMA
+    pvr_txr_load_dma(texture_data, vid_stream.textures[vid_stream.frame_index], vid_stream.texture_byte_length, 1, NULL, 0);
 
-    VTS = ++frame / (double)vid_stream.fps;
-    while(ATS < VTS) {
+    VTS = ++frame / (double)vid_stream.framerate;
+    while(ATS < VTS)
         thd_pass();
-    } 
 
     pvr_wait_ready();
     pvr_scene_begin();
     pvr_list_begin(PVR_LIST_OP_POLY);
 
-    pvr_prim(&vid_stream.hdr[vid_stream.current_frame], sizeof(pvr_poly_hdr_t));
+    pvr_prim(&vid_stream.hdr[vid_stream.frame_index], sizeof(pvr_poly_hdr_t));
     pvr_prim(&vid_stream.vert[0], sizeof(pvr_vertex_t));
     pvr_prim(&vid_stream.vert[1], sizeof(pvr_vertex_t));
     pvr_prim(&vid_stream.vert[2], sizeof(pvr_vertex_t));
@@ -343,7 +370,7 @@ static void format_video_cb(unsigned short *texture_data, int width, int height,
     pvr_list_finish();
     pvr_scene_finish();
 
-    vid_stream.current_frame = !vid_stream.current_frame;
+    vid_stream.frame_index = !vid_stream.frame_index;
 }
 
 static void format_audio_cb(unsigned char *audio_data, int data_length, int channels) {
@@ -376,11 +403,32 @@ static void* aica_callback(snd_stream_hnd_t hnd, int bytes_needed, int* bytes_re
     mutex_unlock(&snd_stream.decode_buffer_mut);
 
     samples_done += bytes_needed; /* Record the Audio Time Stamp */
-    ATS = samples_done/AUDIO_SAMPLES_PER_SEC;
+    ATS = samples_done/audio_samples_per_sec;
 
     *bytes_returning = bytes_needed;
 
     return snd_stream.pcm_buffer;
+}
+
+static void initialize_defaults(format_player_t* player, int index) {
+    frame = 0;
+    samples_done = 0;
+    ATS = 0, VTS = 0;
+    audio_samples_per_sec = 0;
+
+    format_set_video_decode_callback(player->format, format_video_cb);
+    format_set_audio_decode_callback(player->format, format_audio_cb);
+
+    vid_stream.framerate = format_get_framerate(player->format);
+
+    snd_stream.shnd = index;
+    snd_stream.status = SND_STREAM_STATUS_READY;
+    audio_samples_per_sec = (double)(snd_stream.rate*snd_stream.channels*2.0);
+
+    player->initialized_format = 1;
+
+    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
+    initialize_audio();
 }
 
 static int initialize_graphics(int width, int height) 
@@ -388,17 +436,18 @@ static int initialize_graphics(int width, int height)
     if(vid_stream.initialized)
         return SUCCESS;
 
-    vid_stream.textures[0] = pvr_mem_malloc(width * height * 2);
-    vid_stream.textures[1] = pvr_mem_malloc(width * height * 2);
+    vid_stream.texture_byte_length = width * height * 2;
+    vid_stream.textures[0] = pvr_mem_malloc(vid_stream.texture_byte_length);
+    vid_stream.textures[1] = pvr_mem_malloc(vid_stream.texture_byte_length);
     if (!vid_stream.textures[0] || !vid_stream.textures[1])
         return OUT_OF_VID_MEMORY;
 
     pvr_poly_cxt_t cxt;
 
     /* Precompile the poly headers */
-    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY, PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED, width, height, vid_stream.textures[0], PVR_FILTER_NONE);
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY, PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED, width, height, vid_stream.textures[0], PVR_FILTER_BILINEAR);
     pvr_poly_compile(&vid_stream.hdr[0], &cxt);
-    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY, PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED, width, height, vid_stream.textures[1], PVR_FILTER_NONE);
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY, PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED, width, height, vid_stream.textures[1], PVR_FILTER_BILINEAR);
     pvr_poly_compile(&vid_stream.hdr[1], &cxt);
 
     float ratio;
@@ -449,7 +498,11 @@ static int initialize_audio() {
         return SUCCESS;
 
     /* allocate PCM buffer */
-    snd_stream.decode_buffer.buffer = malloc(STREAM_BUFFER_SIZE);
+    snd_stream.decode_buffer.head = 0;
+    snd_stream.decode_buffer.tail = 0;
+    snd_stream.decode_buffer.size = 0;
+    snd_stream.decode_buffer.capacity = AUDIO_DECODE_BUFFER_SIZE;
+    snd_stream.decode_buffer.buffer = malloc(AUDIO_DECODE_BUFFER_SIZE);
     if(snd_stream.decode_buffer.buffer == NULL)
         return OUT_OF_MEMORY;
     
@@ -477,6 +530,9 @@ static void* player_snd_thread() {
                 break;
             case SND_STREAM_STATUS_STOPPING:
                 snd_stream_stop(snd_stream.shnd);
+                snd_stream.decode_buffer.head = 0;
+                snd_stream.decode_buffer.tail = 0;
+                snd_stream.decode_buffer.size = 0;
                 snd_stream.status = SND_STREAM_STATUS_READY;
                 break;
             case SND_STREAM_STATUS_STREAMING:
@@ -487,30 +543,6 @@ static void* player_snd_thread() {
     }
 
     return NULL;
-}
-
-static uint64_t dc_get_time() {
-    uint32_t s, ms;
-    uint64_t msec;
-
-    timer_ms_gettime(&s, &ms);
-    msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
-
-    return msec;
-}
-
-static void initialize_defaults(format_player_t* player, int index) {
-    format_set_video_decode_callback(player->format, format_video_cb);
-    format_set_audio_decode_callback(player->format, format_audio_cb);
-
-    snd_stream.shnd = index;
-    snd_stream.status = SND_STREAM_STATUS_READY;
-    AUDIO_SAMPLES_PER_SEC = (double)(snd_stream.rate*snd_stream.channels*2.0);
-
-    player->initialized_format = 1;
-
-    initialize_graphics(format_get_width(player->format), format_get_height(player->format));
-    initialize_audio();
 }
 
 static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length) {
@@ -539,4 +571,14 @@ static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_lengt
 
     rb->size -= data_length;
     return 1;
+}
+
+static uint64_t dc_get_time() {
+    uint32_t s, ms;
+    uint64_t msec;
+
+    timer_ms_gettime(&s, &ms);
+    msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
+
+    return msec;
 }
