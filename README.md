@@ -22,4 +22,4 @@ For a sample of this actually being used checkout this [project](https://github.
 <!-- LICENSE -->
 ## License
 
-Distributed under the MIT License. See `LICENSE.txt` for more information.
+Distributed under the BSD 2 License. See `LICENSE` for more information.
