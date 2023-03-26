@@ -45,7 +45,9 @@ void format_seek(format_t* format);
 
 int format_get_loop(format_t* format);
 
-void format_set_loop(format_t* format, int loop);
+typedef void(*format_loop_callback)
+	(void);
+void format_set_loop(format_t* format, int loop, format_loop_callback cb);
 
 int format_decode(format_t* format);
 

@@ -4,6 +4,7 @@
 int format_errno = 0;
 
 struct format_t {
+    format_loop_callback loop_callback;
     format_video_decode_callback video_decode_callback;
 	format_audio_decode_callback audio_decode_callback;
 };
@@ -24,7 +25,7 @@ int format_get_loop(format_t* format) {
     return -1;
 }
 
-void format_set_loop(format_t* format, int loop) {
+void format_set_loop(format_t* format, int loop, format_loop_callback cb) {
 
 }
 

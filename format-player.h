@@ -27,7 +27,7 @@ typedef void (*frame_callback)();
 
 typedef struct format_player_t format_player_t;
 
-int player_init();
+int player_init(void);
 void player_shutdown(format_player_t* format_player);
 
 format_player_t* player_create(const char* filename);

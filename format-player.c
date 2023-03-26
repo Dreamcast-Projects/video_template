@@ -68,12 +68,13 @@ static void* player_snd_thread();
 static void* aica_callback(snd_stream_hnd_t hnd, int req, int* done);
 
 // The blueprint of these callbacks can be different depending on the format
+static void format_loop_cb(void);
 static void format_video_cb(unsigned short *buf, int width, int height, int stride, int texture_height);
 static void format_audio_cb(unsigned char *buf, int size, int channels);
 
 static void initialize_defaults(format_player_t* player, int index);
 static int initialize_graphics(int width, int height);
-static int initialize_audio();
+static int initialize_audio(void);
 
 static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
 static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
@@ -93,7 +94,7 @@ static unsigned long samples_done;
 static float ATS, VTS;
 static double audio_samples_per_sec;
 
-int player_init() {
+int player_init(void) {
     snd_stream_init();
     pvr_init_defaults();
 
@@ -340,11 +341,15 @@ int player_get_loop(format_player_t* format_player) {
 }
 
 void player_set_loop(format_player_t* format_player, int loop) {
-    format_set_loop(format_player->format, loop);
+    format_set_loop(format_player->format, loop, format_loop_cb);
 }
 
 int player_has_ended(format_player_t* format_player) {
     return format_has_ended(format_player->format);
+}
+
+static void format_loop_cb(void) {
+
 }
 
 static void format_video_cb(unsigned short *texture_data, int width, int height, int stride, int texture_height) {
@@ -493,7 +498,7 @@ static int initialize_graphics(int width, int height)
     return SUCCESS;
 }
 
-static int initialize_audio() {
+static int initialize_audio(void) {
     if(snd_stream.initialized)
         return SUCCESS;
 
