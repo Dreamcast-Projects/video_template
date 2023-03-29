@@ -78,8 +78,6 @@ static int initialize_audio(void);
 static int ring_buffer_write(ring_buffer *rb, const unsigned char *data, int data_length);
 static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_length);
 
-static uint64_t dc_get_time();
-
 static video_hndlr vid_stream;
 static sound_hndlr snd_stream;
 
@@ -558,14 +556,4 @@ static int ring_buffer_read(ring_buffer *rb, unsigned char *data, int data_lengt
 
     rb->size -= data_length;
     return 1;
-}
-
-static uint64_t dc_get_time() {
-    uint32_t s, ms;
-    uint64_t msec;
-
-    timer_ms_gettime(&s, &ms);
-    msec = (((uint64)s) * ((uint64)1000)) + ((uint64)ms);
-
-    return msec;
 }
