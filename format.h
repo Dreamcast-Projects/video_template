@@ -40,7 +40,7 @@ int format_get_loop(format_t* format);
 // Set if we want to look or not.  format-player uses the callback to reset some variables
 // when the video loops
 typedef void(*format_loop_callback)
-	(void);
+	(void* user_data);
 void format_set_loop(format_t* format, int loop, format_loop_callback cb);
 
 // Main decode function.  Should decode a frame of video and audio and execute their respective callbacks
@@ -64,7 +64,7 @@ void format_destroy(format_t* format);
 // The decoder calls this callback function when it has a frame ready for display.
 // You may need to change the params of this depending on your video format.
 typedef void(*format_video_decode_callback)
-	(unsigned short *frame_data, int width, int height, int stride, int texture_height);
+	(unsigned short* frame_data, int width, int height, int stride, int texture_height, void* user_data);
 
 // format-player.c takes care of setting this.  
 void format_set_video_decode_callback(format_t* format, format_video_decode_callback cb);
@@ -72,7 +72,7 @@ void format_set_video_decode_callback(format_t* format, format_video_decode_call
 // The decoder calls this callback function when it has pcm samples ready for output.
 // You may need to change the params of this depending on your audio format
 typedef void(*format_audio_decode_callback)
-	(unsigned char *audio_frame_data, int size, int channels);
+	(unsigned char* audio_frame_data, int size, int channels, void* user_data);
 
 // format-player.c takes care of setting this.
 void format_set_audio_decode_callback(format_t* format, format_audio_decode_callback cb);
